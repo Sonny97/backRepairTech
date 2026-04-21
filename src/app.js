@@ -1,22 +1,27 @@
 const express = require('express');
 const app = express();
 const port = process.env.PORT || 3000;
-const setupApi = require('./api/userApi');
+const userRoutes = require('./routes/userRoutes');
+const cors = require('cors');
+app.use(cors({ origin: 'http://localhost:3002' }));
 
 // Middleware
 app.use(express.json());
 
-// Setup API
-setupApi(app);
+// Setup Routes
+app.use('/', userRoutes);
 
-// Routes
-app.get('/', (req, res) => {
-  res.send('Hello World!');
-});
+
+
+
+// Setup Routes
+app.use('/', userRoutes);
 
 // Start server
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
+
+module.exports = app;
 
 module.exports = app;

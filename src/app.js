@@ -5,7 +5,6 @@ const userRoutes = require('./routes/userRoutes');
 const app = express();
 const port = process.env.PORT || 3001;
 
-// CORS
 app.use(cors({ origin: 'http://localhost:3002' }));
 
 app.use('/ws', (req, res) => {
@@ -38,7 +37,6 @@ app.use('/api/usuarios', userRoutes);
 app.listen(port, () => {
   console.log(`\n🚀 Server running on http://localhost:${port}`);
   console.log(`📋 Endpoints disponibles:`);
-  console.log(`   → GET  http://localhost:${port}/`);
   console.log(`   → POST http://localhost:${port}/api/usuarios/registro`);
   console.log(`   → POST http://localhost:${port}/api/usuarios/login`);
   console.log(`   → GET  http://localhost:${port}/api/usuarios`);

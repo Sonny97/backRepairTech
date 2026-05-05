@@ -5,7 +5,7 @@ module.exports = function validateRegistro(req, res, next) {
   }
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email)) {
-    return res.status(400).json({ message: 'Email inválido' });
+    return res.status(400).json({ message: 'Email NO valido' });
   }
   if (password.length < 6) {
     return res.status(400).json({ message: 'La contraseña debe tener al menos 6 caracteres' });

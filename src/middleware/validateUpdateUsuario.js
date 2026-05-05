@@ -7,7 +7,7 @@ module.exports = function validateUpdateUsuario(req, res, next) {
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email)) {
-    return res.status(400).json({ message: 'Email inválido' });
+    return res.status(400).json({ message: 'Email NO valido' });
   }
 
   next();

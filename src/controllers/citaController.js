@@ -1,4 +1,10 @@
 const pool = require('../db');
+const { 
+  successResponse, 
+  errorResponse, 
+  serverErrorResponse, 
+  notFoundResponse 
+} = require('../utils/responseHelper');
 
 // =============================================
 // OBTENER TÉCNICOS DISPONIBLES (con conteo de citas)
@@ -17,10 +23,9 @@ const getTecnicosDisponibles = async (req, res) => {
     `;
     
     const result = await pool.query(query, [fecha || null]);
-    res.json(result.rows);
+    return successResponse(res, result.rows, 'Técnicos disponibles obtenidos');
   } catch (error) {
-    console.error('Error al obtener técnicos:', error);
-    res.status(500).json({ error: error.message });
+    return serverErrorResponse(res, error, 'Error al obtener técnicos');
   }
 };
 
@@ -42,13 +47,12 @@ const getHorariosDisponibles = async (req, res) => {
       const horasOcupadas = citasOcupadas.rows.map(c => c.hora);
       const horariosDisponibles = horarios.filter(h => !horasOcupadas.includes(h));
       
-      return res.json(horariosDisponibles);
+      return successResponse(res, horariosDisponibles, 'Horarios disponibles obtenidos');
     }
     
-    res.json(horarios);
+    return successResponse(res, horarios, 'Horarios obtenidos');
   } catch (error) {
-    console.error('Error al obtener horarios:', error);
-    res.status(500).json({ error: error.message });
+    return serverErrorResponse(res, error, 'Error al obtener horarios');
   }
 };
 
@@ -71,13 +75,7 @@ const crearCita = async (req, res) => {
     clienteDireccion 
   } = req.body;
 
-  // Validar campos requeridos
-  if (!tipoServicio || !electrodomestico || !fecha || !clienteId) {
-    return res.status(400).json({ 
-      error: 'Faltan campos requeridos',
-      campos: { tipoServicio, electrodomestico, fecha, clienteId }
-    });
-  }
+  // Validaciones ya realizadas por middleware validateCrearCita
 
   try {
     // Buscar un técnico disponible para la fecha (el que tenga menos citas asignadas)
@@ -93,9 +91,7 @@ const crearCita = async (req, res) => {
     );
 
     if (tecnicoDisponible.rows.length === 0) {
-      return res.status(400).json({ 
-        error: 'No hay técnicos disponibles para la fecha seleccionada. Por favor, elige otra fecha.' 
-      });
+      return errorResponse(res, 'No hay técnicos disponibles para la fecha seleccionada. Por favor, elige otra fecha.', 400);
     }
 
     const tecnicoId = tecnicoDisponible.rows[0].id;
@@ -118,9 +114,7 @@ const crearCita = async (req, res) => {
     }
 
     if (!horaAsignada) {
-      return res.status(400).json({ 
-        error: 'No hay horarios disponibles para la fecha seleccionada. Por favor, elige otra fecha.' 
-      });
+      return errorResponse(res, 'No hay horarios disponibles para la fecha seleccionada. Por favor, elige otra fecha.', 400);
     }
 
     // Insertar la cita
@@ -148,14 +142,9 @@ const crearCita = async (req, res) => {
     
     console.log(`✅ Cita creada: Técnico asignado: ${tecnicoNombre}, Hora: ${horaAsignada}`);
     
-    res.status(201).json({ 
-      success: true, 
-      message: 'Cita creada exitosamente', 
-      data: result.rows[0] 
-    });
+    return successResponse(res, result.rows[0], 'Cita creada exitosamente', 201);
   } catch (error) {
-    console.error('❌ Error al crear cita:', error);
-    res.status(500).json({ error: error.message });
+    return serverErrorResponse(res, error, 'Error al crear la cita');
   }
 };
 
@@ -174,10 +163,9 @@ const getCitasByCliente = async (req, res) => {
        ORDER BY c.fecha DESC, c.hora DESC`,
       [clienteId]
     );
-    res.json(result.rows);
+    return successResponse(res, result.rows, 'Citas del cliente obtenidas');
   } catch (error) {
-    console.error('Error al obtener citas del cliente:', error);
-    res.status(500).json({ error: error.message });
+    return serverErrorResponse(res, error, 'Error al obtener citas del cliente');
   }
 };
 
@@ -194,22 +182,21 @@ const cancelarCita = async (req, res) => {
     );
     
     if (cita.rows.length === 0) {
-      return res.status(404).json({ error: 'Cita no encontrada' });
+      return notFoundResponse(res, 'Cita');
     }
     
     if (cita.rows[0].estado === 'cancelada') {
-      return res.status(400).json({ error: 'La cita ya está cancelada' });
+      return errorResponse(res, 'La cita ya está cancelada', 400);
     }
     
     if (cita.rows[0].estado === 'completada') {
-      return res.status(400).json({ error: 'No se puede cancelar una cita completada' });
+      return errorResponse(res, 'No se puede cancelar una cita completada', 400);
     }
     
     await pool.query('UPDATE citas SET estado = $1 WHERE id = $2', ['cancelada', id]);
-    res.json({ success: true, message: 'Cita cancelada exitosamente' });
+    return successResponse(res, null, 'Cita cancelada exitosamente');
   } catch (error) {
-    console.error('Error al cancelar cita:', error);
-    res.status(500).json({ error: error.message });
+    return serverErrorResponse(res, error, 'Error al cancelar la cita');
   }
 };
 
@@ -225,10 +212,9 @@ const getAllCitas = async (req, res) => {
        LEFT JOIN usuarios u ON c.tecnico_id = u.id
        ORDER BY c.fecha DESC, c.hora DESC`
     );
-    res.json(result.rows);
+    return successResponse(res, result.rows, 'Todas las citas obtenidas');
   } catch (error) {
-    console.error('Error al obtener citas:', error);
-    res.status(500).json({ error: error.message });
+    return serverErrorResponse(res, error, 'Error al obtener citas');
   }
 };
 
@@ -239,11 +225,7 @@ const updateCitaEstado = async (req, res) => {
   const { id } = req.params;
   const { estado } = req.body;
   
-  const estadosValidos = ['pendiente', 'confirmada', 'en_proceso', 'completada', 'cancelada'];
-  
-  if (!estadosValidos.includes(estado)) {
-    return res.status(400).json({ error: 'Estado no válido' });
-  }
+  // Validación de estado ya realizada por middleware validateCitaEstado
   
   try {
     const result = await pool.query(
@@ -252,13 +234,12 @@ const updateCitaEstado = async (req, res) => {
     );
     
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Cita no encontrada' });
+      return notFoundResponse(res, 'Cita');
     }
     
-    res.json({ success: true, message: 'Estado actualizado', data: result.rows[0] });
+    return successResponse(res, result.rows[0], 'Estado actualizado correctamente');
   } catch (error) {
-    console.error('Error al actualizar estado:', error);
-    res.status(500).json({ error: error.message });
+    return serverErrorResponse(res, error, 'Error al actualizar estado');
   }
 };
 

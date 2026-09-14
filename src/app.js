@@ -7,7 +7,7 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 // CORS
-app.use(cors({ origin: 'http://localhost:3002' }));
+app.use(cors({ origin: 'http://localhost:3003' }));
 
 app.use('/ws', (req, res) => {
   res.status(404).send('WebSocket endpoint not configured');

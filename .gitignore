@@ -1,9 +1,6 @@
 # Dependencias (se reconstruyen con: npm install)
 node_modules/
 
-# Reportes de cobertura generados por Jest
-coverage/
-
 # Variables de entorno
 .env
 .env.*

@@ -14,6 +14,7 @@ const validateLogin = require('../src/middleware/validateLogin');
 const validateUpdateUsuario = require('../src/middleware/validateUpdateUsuario');
 const validateCitaEstado = require('../src/middleware/validateCitaEstado');
 const validateId = require('../src/middleware/validateId');
+const validateRegistro = require('../src/middleware/validateRegistro');
 
 // -------- Dobles de prueba de Express --------
 function crearRes() {
@@ -223,5 +224,49 @@ describe('4. DIAGRAMA DE TRANSICION DE ESTADOS - estado de la cita', () => {
   test('CP-TE03 | estado con mayusculas ("Pendiente") -> 400 (comparacion sensible)', () => {
     const r = ejecutar(validateCitaEstado, { body: { estado: 'Pendiente' } });
     expect(r.statusCode).toBe(400);
+  });
+});
+
+// =============================================================
+describe('5. VALIDACION DE REGISTRO (rol invalido)', () => {
+
+  const REGISTRO_OK = {
+    docType: 'CC', docNumber: '12345678', fullName: 'Juan Perez',
+    phone: '3001234567', email: 'juan@repairtech.com',
+    address: 'Calle 123', password: 'Clave123'
+  };
+
+  test('CP-RG01 | rol valido ("tecnico") -> next()', () => {
+    const r = ejecutar(validateRegistro, { body: { ...REGISTRO_OK, rol: 'tecnico' } });
+    expect(r.paso).toBe(true);
+  });
+
+  test('CP-RG02 | rol invalido ("superadmin") -> 400', () => {
+    const r = ejecutar(validateRegistro, { body: { ...REGISTRO_OK, rol: 'superadmin' } });
+    expect(r.statusCode).toBe(400);
+    expect(r.mensaje).toMatch(/Rol inválido/);
+  });
+
+  test('CP-RG03 | sin rol -> next() (rol por defecto es cliente)', () => {
+    const r = ejecutar(validateRegistro, { body: REGISTRO_OK });
+    expect(r.paso).toBe(true);
+  });
+
+  test('CP-RG04 | todos los campos obligatorios ausentes -> 400', () => {
+    const r = ejecutar(validateRegistro, { body: {} });
+    expect(r.statusCode).toBe(400);
+    expect(r.mensaje).toMatch(/Todos los campos son obligatorios/);
+  });
+
+  test('CP-RG05 | email invalido -> 400', () => {
+    const r = ejecutar(validateRegistro, { body: { ...REGISTRO_OK, email: 'no-es-email' } });
+    expect(r.statusCode).toBe(400);
+    expect(r.mensaje).toMatch(/Email NO valido/);
+  });
+
+  test('CP-RG06 | password < 6 caracteres -> 400', () => {
+    const r = ejecutar(validateRegistro, { body: { ...REGISTRO_OK, password: '12345' } });
+    expect(r.statusCode).toBe(400);
+    expect(r.mensaje).toMatch(/al menos 6 caracteres/);
   });
 });

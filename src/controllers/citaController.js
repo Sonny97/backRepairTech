@@ -1,113 +1,146 @@
-const pool = require('../db');
-const { 
-  successResponse, 
-  errorResponse, 
-  serverErrorResponse, 
-  notFoundResponse 
+const prisma = require('../prisma');
+const {
+  successResponse,
+  errorResponse,
+  serverErrorResponse,
+  notFoundResponse
 } = require('../utils/responseHelper');
 
-// =============================================
-// OBTENER TÉCNICOS DISPONIBLES (con conteo de citas)
-// =============================================
+const HORARIOS_DISPONIBLES = ['09:00 AM', '10:00 AM', '11:00 AM', '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM'];
+
+const parseDate = (fechaStr) => {
+  if (!fechaStr) return null;
+  const [year, month, day] = fechaStr.split('-').map(Number);
+  return new Date(year, month - 1, day);
+};
+
 const getTecnicosDisponibles = async (req, res) => {
-  const { fecha, tipo } = req.query;
-  
+  const { fecha } = req.query;
+
   try {
-    let query = `
-      SELECT u.id, u.nombre_completo, u.telefono, u.email, COUNT(c.id) as citas_asignadas
-      FROM usuarios u
-      LEFT JOIN citas c ON u.id = c.tecnico_id AND c.fecha = $1 AND c.estado != 'cancelada'
-      WHERE u.rol = 'tecnico'
-      GROUP BY u.id, u.nombre_completo, u.telefono, u.email
-      ORDER BY citas_asignadas ASC
-    `;
-    
-    const result = await pool.query(query, [fecha || null]);
-    return successResponse(res, result.rows, 'Técnicos disponibles obtenidos');
+    const fechaParsed = parseDate(fecha);
+    const tecnicos = await prisma.usuario.findMany({
+      where: { rol: 'tecnico' },
+      select: {
+        id: true,
+        nombre_completo: true,
+        telefono: true,
+        email: true,
+        _count: {
+          select: {
+            citasTecnico: {
+              where: {
+                fecha: fechaParsed,
+                estado: { not: 'cancelada' }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const resultado = tecnicos.map(t => ({
+      id: t.id,
+      nombre_completo: t.nombre_completo,
+      telefono: t.telefono,
+      email: t.email,
+      citas_asignadas: t._count.citasTecnico
+    }));
+
+    resultado.sort((a, b) => a.citas_asignadas - b.citas_asignadas);
+
+    return successResponse(res, resultado, 'Técnicos disponibles obtenidos');
   } catch (error) {
     return serverErrorResponse(res, error, 'Error al obtener técnicos');
   }
 };
 
-// =============================================
-// OBTENER HORARIOS DISPONIBLES
-// =============================================
 const getHorariosDisponibles = async (req, res) => {
-  const { fecha, tipo } = req.query;
-  
-  const horarios = ['09:00 AM', '10:00 AM', '11:00 AM', '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM'];
-  
+  const { fecha } = req.query;
+
   try {
     if (fecha) {
-      const citasOcupadas = await pool.query(
-        'SELECT hora FROM citas WHERE fecha = $1',
-        [fecha]
-      );
-      
-      const horasOcupadas = citasOcupadas.rows.map(c => c.hora);
-      const horariosDisponibles = horarios.filter(h => !horasOcupadas.includes(h));
-      
+      const citasOcupadas = await prisma.cita.findMany({
+        where: {
+          fecha: new Date(fecha),
+          estado: { not: 'cancelada' }
+        },
+        select: { hora: true }
+      });
+
+      const horasOcupadas = citasOcupadas.map(c => c.hora);
+      const horariosDisponibles = HORARIOS_DISPONIBLES.filter(h => !horasOcupadas.includes(h));
+
       return successResponse(res, horariosDisponibles, 'Horarios disponibles obtenidos');
     }
-    
-    return successResponse(res, horarios, 'Horarios obtenidos');
+
+    return successResponse(res, HORARIOS_DISPONIBLES, 'Horarios obtenidos');
   } catch (error) {
     return serverErrorResponse(res, error, 'Error al obtener horarios');
   }
 };
 
-// =============================================
-// CREAR UNA NUEVA CITA (ASIGNACIÓN AUTOMÁTICA)
-// =============================================
 const crearCita = async (req, res) => {
   console.log('📥 Body recibido:', req.body);
-  
-  const { 
-    tipoServicio, 
-    electrodomestico, 
-    marca, 
-    descripcion, 
-    fecha, 
-    clienteId, 
-    clienteNombre, 
-    clienteEmail, 
-    clienteTelefono, 
-    clienteDireccion 
+
+  const {
+    tipoServicio,
+    electrodomestico,
+    marca,
+    descripcion,
+    fecha,
+    clienteId,
+    clienteNombre,
+    clienteEmail,
+    clienteTelefono,
+    clienteDireccion
   } = req.body;
 
-  // Validaciones ya realizadas por middleware validateCrearCita
-
   try {
-    // Buscar un técnico disponible para la fecha (el que tenga menos citas asignadas)
-    const tecnicoDisponible = await pool.query(
-      `SELECT u.id, u.nombre_completo, COUNT(c.id) as citas_asignadas
-       FROM usuarios u
-       LEFT JOIN citas c ON u.id = c.tecnico_id AND c.fecha = $1 AND c.estado != 'cancelada'
-       WHERE u.rol = 'tecnico'
-       GROUP BY u.id, u.nombre_completo
-       ORDER BY citas_asignadas ASC
-       LIMIT 1`,
-      [fecha]
-    );
+    const tecnicoDisponible = await prisma.usuario.findMany({
+      where: { rol: 'tecnico' },
+      select: {
+        id: true,
+        nombre_completo: true,
+        _count: {
+          select: {
+            citasTecnico: {
+              where: {
+                fecha: parseDate(fecha),
+                estado: { not: 'cancelada' }
+              }
+            }
+          }
+        }
+      },
+      orderBy: {
+        citasTecnico: { _count: 'asc' }
+      },
+      take: 1
+    });
 
-    if (tecnicoDisponible.rows.length === 0) {
+    if (tecnicoDisponible.length === 0) {
       return errorResponse(res, 'No hay técnicos disponibles para la fecha seleccionada. Por favor, elige otra fecha.', 400);
     }
 
-    const tecnicoId = tecnicoDisponible.rows[0].id;
-    const tecnicoNombre = tecnicoDisponible.rows[0].nombre_completo;
-    
-    // Horarios disponibles predefinidos
-    const horariosDisponibles = ['09:00 AM', '10:00 AM', '11:00 AM', '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM'];
-    
-    // Buscar un horario libre para ese técnico en la fecha
+    const tecnico = tecnicoDisponible[0];
+    const tecnicoId = tecnico.id;
+    const tecnicoNombre = tecnico.nombre_completo;
+
+    const fechaDate = parseDate(fecha);
     let horaAsignada = null;
-    for (const hora of horariosDisponibles) {
-      const citaExistente = await pool.query(
-        'SELECT id FROM citas WHERE fecha = $1 AND hora = $2 AND tecnico_id = $3 AND estado != $4',
-        [fecha, hora, tecnicoId, 'cancelada']
-      );
-      if (citaExistente.rows.length === 0) {
+
+    for (const hora of HORARIOS_DISPONIBLES) {
+      const citaExistente = await prisma.cita.findFirst({
+        where: {
+          fecha: fechaDate,
+          hora,
+          tecnico_id: tecnicoId,
+          estado: { not: 'cancelada' }
+        }
+      });
+
+      if (!citaExistente) {
         horaAsignada = hora;
         break;
       }
@@ -117,128 +150,125 @@ const crearCita = async (req, res) => {
       return errorResponse(res, 'No hay horarios disponibles para la fecha seleccionada. Por favor, elige otra fecha.', 400);
     }
 
-    // Insertar la cita
-    const result = await pool.query(
-      `INSERT INTO citas 
-       (cliente_id, cliente_nombre, cliente_email, cliente_telefono, cliente_direccion, 
-        tecnico_id, tipo_servicio, electrodomestico, marca, descripcion, fecha, hora, estado)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pendiente')
-       RETURNING *`,
-      [
-        clienteId, 
-        clienteNombre || 'Cliente', 
-        clienteEmail || 'email@test.com', 
-        clienteTelefono || '', 
-        clienteDireccion || '', 
-        tecnicoId, 
-        tipoServicio, 
-        electrodomestico, 
-        marca || null, 
-        descripcion || null, 
-        fecha, 
-        horaAsignada
-      ]
-    );
-    
+    const cita = await prisma.cita.create({
+      data: {
+        cliente_id: BigInt(clienteId),
+        cliente_nombre: clienteNombre || 'Cliente',
+        cliente_email: clienteEmail || 'email@test.com',
+        cliente_telefono: clienteTelefono || '',
+        cliente_direccion: clienteDireccion || '',
+        tecnico_id: tecnicoId,
+        tipo_servicio: tipoServicio,
+        electrodomestico,
+        marca: marca || null,
+        descripcion: descripcion || null,
+        fecha: fechaDate,
+        hora: horaAsignada,
+        estado: 'pendiente'
+      }
+    });
+
     console.log(`✅ Cita creada: Técnico asignado: ${tecnicoNombre}, Hora: ${horaAsignada}`);
-    
-    return successResponse(res, result.rows[0], 'Cita creada exitosamente', 201);
+
+    return successResponse(res, cita, 'Cita creada exitosamente', 201);
   } catch (error) {
     return serverErrorResponse(res, error, 'Error al crear la cita');
   }
 };
 
-// =============================================
-// OBTENER CITAS DE UN CLIENTE
-// =============================================
 const getCitasByCliente = async (req, res) => {
   const { clienteId } = req.params;
-  
+
   try {
-    const result = await pool.query(
-      `SELECT c.*, u.nombre_completo as tecnico_nombre 
-       FROM citas c
-       LEFT JOIN usuarios u ON c.tecnico_id = u.id
-       WHERE c.cliente_id = $1
-       ORDER BY c.fecha DESC, c.hora DESC`,
-      [clienteId]
-    );
-    return successResponse(res, result.rows, 'Citas del cliente obtenidas');
+    const citas = await prisma.cita.findMany({
+      where: { cliente_id: BigInt(clienteId) },
+      orderBy: [{ fecha: 'desc' }, { hora: 'desc' }],
+      include: {
+        tecnico: {
+          select: { nombre_completo: true }
+        }
+      }
+    });
+
+    const resultado = citas.map(cita => ({
+      ...cita,
+      tecnico_nombre: cita.tecnico?.nombre_completo || null
+    }));
+
+    return successResponse(res, resultado, 'Citas del cliente obtenidas');
   } catch (error) {
     return serverErrorResponse(res, error, 'Error al obtener citas del cliente');
   }
 };
 
-// =============================================
-// CANCELAR UNA CITA
-// =============================================
 const cancelarCita = async (req, res) => {
   const { id } = req.params;
-  
+
   try {
-    const cita = await pool.query(
-      'SELECT id, estado FROM citas WHERE id = $1',
-      [id]
-    );
-    
-    if (cita.rows.length === 0) {
+    const cita = await prisma.cita.findUnique({
+      where: { id: BigInt(id) }
+    });
+
+    if (!cita) {
       return notFoundResponse(res, 'Cita');
     }
-    
-    if (cita.rows[0].estado === 'cancelada') {
+
+    if (cita.estado === 'cancelada') {
       return errorResponse(res, 'La cita ya está cancelada', 400);
     }
-    
-    if (cita.rows[0].estado === 'completada') {
+
+    if (cita.estado === 'completada') {
       return errorResponse(res, 'No se puede cancelar una cita completada', 400);
     }
-    
-    await pool.query('UPDATE citas SET estado = $1 WHERE id = $2', ['cancelada', id]);
+
+    await prisma.cita.update({
+      where: { id: BigInt(id) },
+      data: { estado: 'cancelada' }
+    });
+
     return successResponse(res, null, 'Cita cancelada exitosamente');
   } catch (error) {
     return serverErrorResponse(res, error, 'Error al cancelar la cita');
   }
 };
 
-// =============================================
-// OBTENER TODAS LAS CITAS (para admin)
-// =============================================
 const getAllCitas = async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT c.*, 
-              u.nombre_completo as tecnico_nombre
-       FROM citas c
-       LEFT JOIN usuarios u ON c.tecnico_id = u.id
-       ORDER BY c.fecha DESC, c.hora DESC`
-    );
-    return successResponse(res, result.rows, 'Todas las citas obtenidas');
+    const citas = await prisma.cita.findMany({
+      orderBy: [{ fecha: 'desc' }, { hora: 'desc' }],
+      include: {
+        tecnico: {
+          select: { nombre_completo: true }
+        }
+      }
+    });
+
+    const resultado = citas.map(cita => ({
+      ...cita,
+      tecnico_nombre: cita.tecnico?.nombre_completo || null
+    }));
+
+    return successResponse(res, resultado, 'Todas las citas obtenidas');
   } catch (error) {
     return serverErrorResponse(res, error, 'Error al obtener citas');
   }
 };
 
-// =============================================
-// ACTUALIZAR ESTADO DE UNA CITA (para técnico/admin)
-// =============================================
 const updateCitaEstado = async (req, res) => {
   const { id } = req.params;
   const { estado } = req.body;
-  
-  // Validación de estado ya realizada por middleware validateCitaEstado
-  
+
   try {
-    const result = await pool.query(
-      'UPDATE citas SET estado = $1 WHERE id = $2 RETURNING *',
-      [estado, id]
-    );
-    
-    if (result.rows.length === 0) {
+    const cita = await prisma.cita.update({
+      where: { id: BigInt(id) },
+      data: { estado }
+    });
+
+    return successResponse(res, cita, 'Estado actualizado correctamente');
+  } catch (error) {
+    if (error.code === 'P2025') {
       return notFoundResponse(res, 'Cita');
     }
-    
-    return successResponse(res, result.rows[0], 'Estado actualizado correctamente');
-  } catch (error) {
     return serverErrorResponse(res, error, 'Error al actualizar estado');
   }
 };

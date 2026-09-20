@@ -1,0 +1,53 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Usuario {
+  id             BigInt   @id @default(autoincrement())
+  tipo_documento String   @map("tipo_documento")
+  documento      String   @unique
+  nombre_completo String  @map("nombre_completo")
+  telefono       String
+  email          String   @unique
+  direccion      String
+  contrasena     String   @map("contraseña")
+  rol            String   @default("cliente")
+  fecha_registro DateTime @default(now()) @map("fecha_registro")
+
+  citasCliente  Cita[]  @relation("Cliente")
+  citasTecnico  Cita[]  @relation("Tecnico")
+
+  @@map("usuarios")
+}
+
+model Cita {
+  id                  BigInt   @id @default(autoincrement())
+  cliente_id          BigInt   @map("cliente_id")
+  cliente_nombre      String   @map("cliente_nombre")
+  cliente_email       String   @map("cliente_email")
+  cliente_telefono    String   @default("") @map("cliente_telefono")
+  cliente_direccion   String   @default("") @map("cliente_direccion")
+  tecnico_id          BigInt?  @map("tecnico_id")
+  tipo_servicio       String   @map("tipo_servicio")
+  electrodomestico    String
+  marca               String?
+  descripcion         String?
+  fecha               DateTime @db.Date
+  hora                String
+  estado              String   @default("pendiente")
+  fecha_creacion      DateTime @default(now()) @map("fecha_creacion")
+  fecha_actualizacion DateTime @updatedAt @map("fecha_actualizacion")
+
+  cliente Usuario @relation("Cliente", fields: [cliente_id], references: [id], onDelete: Restrict)
+  tecnico Usuario? @relation("Tecnico", fields: [tecnico_id], references: [id], onDelete: SetNull)
+
+  @@index([cliente_id, fecha])
+  @@index([tecnico_id, fecha, estado])
+  @@index([fecha, hora, tecnico_id])
+  @@map("citas")
+}

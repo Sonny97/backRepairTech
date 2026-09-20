@@ -11,12 +11,25 @@
  * @param {number} status - Código HTTP (default 200)
  */
 const successResponse = (res, data = null, message = 'Operación exitosa', status = 200) => {
+  const convertBigInt = (obj) => {
+    if (obj === null || obj === undefined) return obj;
+    if (typeof obj === 'bigint') return Number(obj);
+    if (obj instanceof Date) return obj.toISOString();
+    if (Array.isArray(obj)) return obj.map(convertBigInt);
+    if (typeof obj === 'object') {
+      return Object.fromEntries(
+        Object.entries(obj).map(([k, v]) => [k, convertBigInt(v)])
+      );
+    }
+    return obj;
+  };
+
   return res.status(status).json({
     success: true,
     isServerError: false,
     status,
     message,
-    data
+    data: convertBigInt(data)
   });
 };
 

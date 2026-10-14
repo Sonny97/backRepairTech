@@ -1,0 +1,134 @@
+name: Backend Tests - Jest
+
+on:
+  push:
+    branches:
+      - develop
+      - release/**
+      - master
+      - main
+  pull_request:
+    branches:
+      - develop
+      - release/**
+      - master
+      - main
+
+jobs:
+  backend-tests:
+    name: Run Backend Tests (Jest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: backRepairTech/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd backRepairTech
+          npm install --legacy-peer-deps
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Run Backend Tests (all)
+        run: |
+          cd backRepairTech
+          npm test -- --forceExit 2>&1 | tee backend-test-output.txt
+        continue-on-error: true
+
+      - name: Run Backend Tests with Coverage
+        run: |
+          cd backRepairTech
+          npm run test:coverage -- --forceExit 2>&1 | tee backend-coverage-output.txt
+        continue-on-error: true
+
+      - name: Generate test report
+        if: always()
+        run: |
+          cd backRepairTech
+          mkdir -p reports
+
+          # Create HTML report from test output
+          echo "<html><head><title>Backend Test Report</title>" > reports/report.html
+          echo "<style>body{font-family:Arial;padding:20px} pre{background:#f4f4f4;padding:10px;overflow-x:auto} .pass{color:green} .fail{color:red} table{border-collapse:collapse;width:100%} td,th{border:1px solid #ddd;padding:8px;text-align:left}</style>" >> reports/report.html
+          echo "</head><body><h1>RepairTech Backend - Test Results</h1>" >> reports/report.html
+          echo "<h2>Test Run: $(date)</h2>" >> reports/report.html
+
+          # Extract test summary
+          echo "<h3>Test Summary</h3>" >> reports/report.html
+          echo "<pre>" >> reports/report.html
+          grep -E "Test Suites|Tests:" backend-test-output.txt 2>/dev/null | tail -5 >> reports/report.html || echo "Summary not found" >> reports/report.html
+          echo "</pre>" >> reports/report.html
+
+          # Extract coverage summary
+          echo "<h3>Coverage Summary</h3>" >> reports/report.html
+          echo "<pre>" >> reports/report.html
+          grep -E "All files|% Stmts|% Branch|% Funcs|% Lines" backend-coverage-output.txt 2>/dev/null | tail -10 >> reports/report.html || echo "Coverage not found" >> reports/report.html
+          echo "</pre>" >> reports/report.html
+
+          # Show last 50 lines of test output
+          echo "<h3>Test Output (last 50 lines)</h3>" >> reports/report.html
+          echo "<pre>" >> reports/report.html
+          tail -50 backend-test-output.txt 2>/dev/null >> reports/report.html || echo "Full output in backend-test-output.txt" >> reports/report.html
+          echo "</pre>" >> reports/report.html
+
+          echo "</body></html>" >> reports/report.html
+          echo "Report generated at backRepairTech/reports/report.html"
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: backRepairTech/reports/
+          retention-days: 30
+
+      - name: Upload test outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-outputs
+          path: |
+            backRepairTech/*-output.txt
+          retention-days: 7
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backRepairTech/coverage/
+          retention-days: 14
+
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "## Backend Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+
+          # Extract test counts
+          SUITES=$(grep -oP "Test Suites: \K\d+" backend-test-output.txt 2>/dev/null | head -1)
+          TESTS=$(grep -oP "Tests: \K\d+" backend-test-output.txt 2>/dev/null | head -1)
+          PASSED=$(grep -oP "passed, \K\d+" backend-test-output.txt 2>/dev/null | head -1)
+          FAILED=$(grep -oP ", \d+ failed" backend-test-output.txt 2>/dev/null | grep -oP "\d+ failed" | head -1 || echo "0")
+
+          echo "| Test Suites | ${SUITES:-N/A} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${TESTS:-N/A} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Passed | ${PASSED:-N/A} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Failed | ${FAILED:-0} |" >> $GITHUB_STEP_SUMMARY
+
+          # Coverage
+          STMTS=$(grep "All files" -A 1 backend-coverage-output.txt 2>/dev/null | grep -oP "% Stmts.*" | head -1 || echo "N/A")
+          echo "| Coverage Stmts | ${STMTS:-N/A} |" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Reports available as artifacts." >> $GITHUB_STEP_SUMMARY

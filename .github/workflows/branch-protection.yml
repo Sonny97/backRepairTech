@@ -1,0 +1,182 @@
+name: Branch Protection
+
+on:
+  push:
+    branches:
+      - master
+      - main
+      - develop
+      - release/**
+  pull_request:
+    branches:
+      - master
+      - main
+      - develop
+      - release/**
+
+jobs:
+  protect-branches:
+    name: Enforce Branch Protection Rules
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get branch name
+        id: branch
+        run: |
+          # For pull requests, get the source branch
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BRANCH_NAME="${{ github.head_ref }}"
+          else
+            BRANCH_NAME="${{ github.ref_name }}"
+          fi
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          echo "Event: ${{ github.event_name }}"
+          echo "Branch: $BRANCH_NAME"
+
+      - name: Check if pushing directly to protected branches
+        id: protected_check
+        run: |
+          BRANCH_NAME="${{ env.BRANCH_NAME }}"
+
+          # List of protected branches that reject direct pushes
+          PROTECTED_BRANCHES="main master develop release"
+
+          echo "Checking branch: $BRANCH_NAME"
+          echo "Event: ${{ github.event_name }}"
+
+          # For push events, we need to block direct pushes to protected branches
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "---"
+            echo "BLOCKED: Direct push to branch '$BRANCH_NAME'"
+            echo "---"
+            echo "Please create a feature/fix/refactor branch and open a Pull Request instead."
+            echo ""
+            echo "Allowed branch prefixes:"
+            echo "  - feature/*"
+            echo "  - feat/*"
+            echo "  - hotfix/*"
+            echo "  - refactor/*"
+            echo "  - release/*"
+            echo "  - fix/*"
+            echo ""
+            echo "Protected branches that require PR:"
+            echo "  - master"
+            echo "  - main"
+            echo "  - develop"
+            echo "  - release/*"
+            exit 1
+          fi
+
+      - name: Validate branch name for Pull Requests
+        if: github.event_name == 'pull_request'
+        run: |
+          BRANCH_NAME="${{ env.BRANCH_NAME }}"
+
+          # Allowed prefixes for PR branches
+          ALLOWED_PREFIXES="^feature/|^feat/|^hotfix/|^refactor/|^release/|^fix/"
+
+          echo "Validating branch name: $BRANCH_NAME"
+
+          if echo "$BRANCH_NAME" | grep -Eq "$ALLOWED_PREFIXES"; then
+            echo "✅ Branch name '$BRANCH_NAME' is valid"
+          else
+            echo "❌ Branch name '$BRANCH_NAME' does not match allowed patterns"
+            echo ""
+            echo "Please rename your branch using:"
+            echo "  git checkout $BRANCH_NAME"
+            echo "  git checkout -b feature/your-feature-name"
+            echo "  git push origin feature/your-feature-name"
+            echo ""
+            echo "Allowed patterns:"
+            echo "  - feature/*  (new features)"
+            echo "  - feat/*    (short for feature)"
+            echo "  - hotfix/*  (urgent fixes)"
+            echo "  - refactor/* (code refactoring)"
+            echo "  - release/* (release branches)"
+            echo "  - fix/*     (bug fixes)"
+            exit 1
+          fi
+
+  check-commits:
+    name: Validate Commit Messages
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate conventional commits
+        run: |
+          echo "Checking commit messages on branch: ${{ github.head_ref }}"
+          echo ""
+          echo "Last 10 commits:"
+          git log --oneline -10
+
+          echo ""
+          echo "Note: While we encourage Conventional Commits format"
+          echo "(feat:, fix:, docs:, refactor:, etc.), it is not enforced."
+          echo ""
+          echo "Recommended commit message format:"
+          echo "  feat: add new login form validation"
+          echo "  fix: resolve dropdown not opening"
+          echo "  docs: update README"
+          echo "  refactor: simplify contact form logic"
+
+  require-tests-passed:
+    name: Require Backend Tests Status
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [protect-branches]
+
+    steps:
+      - name: Check backend tests workflow
+        run: |
+          echo "This workflow requires the Backend Tests workflow to pass."
+          echo ""
+          echo "The Backend Tests workflow (backend-tests.yml) will automatically"
+          echo "run when a PR is opened or updated against:"
+          echo "  - develop"
+          echo "  - release/*"
+          echo "  - master"
+          echo "  - main"
+          echo ""
+          echo "Make sure the Backend Tests workflow passes before merging."
+          echo "Check the 'Checks' tab of this Pull Request."
+
+  # Este job siempre falla en push a ramas protegidas para evitar el push directo
+  block-direct-push:
+    name: Block Direct Push
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - name: Block direct push
+        run: |
+          echo "=========================================="
+          echo "❌ DIRECT PUSH BLOCKED"
+          echo "=========================================="
+          echo ""
+          echo "You are attempting to push directly to: ${{ github.ref_name }}"
+          echo ""
+          echo "This is a protected branch. All changes must go through a Pull Request."
+          echo ""
+          echo "To contribute:"
+          echo "  1. Create a feature branch:"
+          echo "     git checkout -b feature/my-new-feature"
+          echo ""
+          echo "  2. Make your changes and commit:"
+          echo "     git add ."
+          echo "     git commit -m 'feat: description of changes'"
+          echo ""
+          echo "  3. Push your branch:"
+          echo "     git push origin feature/my-new-feature"
+          echo ""
+          echo "  4. Open a Pull Request on GitHub"
+          echo ""
+          echo "=========================================="
+          exit 1

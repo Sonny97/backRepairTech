@@ -61,8 +61,8 @@ Documentación en `docs/testing/`:
 
 | Workflow | Trigger | Descripción |
 |----------|---------|-------------|
-| `backend-tests.yml` | Push/PR a develop, release/*, master, main | Ejecuta los 123 tests de Jest con coverage |
-| `branch-protection.yml` | Push/PR a develop, release/*, master, main | Solo notifica y valida convenciones (no bloquea) |
+| `backend-tests.yml` | PR hacia develop, master, main, release/* | Ejecuta los 129 tests de Jest con coverage |
+| `branch-protection.yml` | PR hacia develop, master, main, release/* | Solo notifica y valida convenciones (no bloquea) |
 
 ### Ramas protegidas
 

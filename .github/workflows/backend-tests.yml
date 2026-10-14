@@ -1,14 +1,25 @@
 name: Backend Tests - Jest
 
+# Se ejecuta en PRs (merge) hacia develop o master, solo si la rama origen es una permitida.
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
-    branches: [develop, master, main, release/*]
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [develop, master]
 
 jobs:
   backend-tests:
     name: Run Backend Tests (Jest)
+    if: >-
+      startsWith(github.head_ref, 'release/') ||
+      startsWith(github.head_ref, 'feature/') ||
+      startsWith(github.head_ref, 'feat/') ||
+      startsWith(github.head_ref, 'hotfix/') ||
+      startsWith(github.head_ref, 'refactor/')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/test
 
     steps:
       - name: Checkout code
@@ -18,33 +29,62 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
+          cache: npm
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
-      - name: Run Backend Tests
-        run: npm test -- --forceExit 2>&1 | tee backend-test-output.txt
-        continue-on-error: true
+      - name: Install report generators
+        run: npm install --no-save --legacy-peer-deps jest-junit jest-html-reporter
 
-      - name: Run Backend Tests with Coverage
-        run: npm run test:coverage -- --forceExit 2>&1 | tee backend-coverage-output.txt
-        continue-on-error: true
-
-      - name: Generate test report
-        if: always()
+      - name: Run Backend Tests (with coverage)
         run: |
           mkdir -p reports
-          echo "<html><head><title>Backend Test Report</title>" > reports/report.html
-          echo "<style>body{font-family:Arial;padding:20px} pre{background:#f4f4f4;padding:10px;overflow-x:auto}</style>" >> reports/report.html
-          echo "</head><body><h1>RepairTech Backend - Test Results</h1>" >> reports/report.html
-          echo "<h2>$(date)</h2>" >> reports/report.html
-          echo "<h3>Summary</h3><pre>" >> reports/report.html
-          grep -E "Test Suites|Tests:|passed|failed" backend-test-output.txt 2>/dev/null | tail -5 >> reports/report.html || echo "N/A" >> reports/report.html
-          echo "</pre><h3>Coverage</h3><pre>" >> reports/report.html
-          grep -E "All files|% Stmts|% Branch|% Funcs|% Lines" backend-coverage-output.txt 2>/dev/null | tail -10 >> reports/report.html || echo "N/A" >> reports/report.html
-          echo "</pre></body></html>" >> reports/report.html
+          npx jest --coverage --forceExit --ci \
+            --json --outputFile=reports/results.json \
+            --reporters=default \
+            --reporters=jest-junit \
+            --reporters=jest-html-reporter 2>&1 | tee reports/backend-test-output.txt
+        env:
+          JEST_JUNIT_OUTPUT_DIR: reports
+          JEST_JUNIT_OUTPUT_NAME: junit.xml
+          JEST_HTML_REPORTER_OUTPUT_PATH: reports/report.html
+          JEST_HTML_REPORTER_PAGE_TITLE: RepairTech Backend - Test Report
+          JEST_HTML_REPORTER_INCLUDE_FAILURE_MSG: 'true'
+
+      - name: Test Summary
+        if: always()
+        run: |
+          node -e '
+          const fs = require("fs");
+          const out = process.env.GITHUB_STEP_SUMMARY;
+          let md = "## Backend Test Results\n\n";
+          try {
+            const r = JSON.parse(fs.readFileSync("reports/results.json", "utf8"));
+            md += `**${r.success ? "✅ PASSED" : "❌ FAILED"}**\n\n`;
+            md += "| Metric | Value |\n|---|---|\n";
+            md += `| Test Suites | ${r.numPassedTestSuites}/${r.numTotalTestSuites} passed |\n`;
+            md += `| Tests | ${r.numTotalTests} |\n| Passed | ${r.numPassedTests} |\n| Failed | ${r.numFailedTests} |\n| Skipped | ${r.numPendingTests} |\n\n`;
+            md += "### Per suite\n\n| Suite | Status | Passed | Failed |\n|---|---|---|---|\n";
+            for (const s of r.testResults) {
+              const p = s.assertionResults.filter(t => t.status === "passed").length;
+              const f = s.assertionResults.filter(t => t.status === "failed").length;
+              md += `| ${s.name.split("/tests/").pop()} | ${s.status === "passed" ? "✅" : "❌"} | ${p} | ${f} |\n`;
+            }
+            const failed = r.testResults.flatMap(s => s.assertionResults.filter(t => t.status === "failed"));
+            if (failed.length) {
+              md += "\n### Failed tests\n\n";
+              for (const t of failed) md += `- ❌ ${t.fullName}\n`;
+            }
+          } catch (e) { md += "No se generó reports/results.json (las pruebas no llegaron a ejecutarse).\n"; }
+          try {
+            const c = fs.readFileSync("reports/backend-test-output.txt", "utf8").match(/^(Statements|Branches|Functions|Lines)\s*:.*$/gm);
+            if (c) md += "\n### Coverage\n\n```\n" + c.join("\n") + "\n```\n";
+          } catch (e) {}
+          fs.appendFileSync(out, md);
+          '
 
       - name: Upload test reports
         if: always()
@@ -53,22 +93,5 @@ jobs:
           name: backend-test-reports-${{ github.run_number }}
           path: |
             reports/
-            backend-test-output.txt
-            backend-coverage-output.txt
+            coverage/
           retention-days: 30
-
-      - name: Test Summary
-        if: always()
-        run: |
-          echo "## Backend Test Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          SUITES=$(grep -oP "Test Suites: \K\d+" backend-test-output.txt 2>/dev/null | head -1 || echo "N/A")
-          TESTS=$(grep -oP "Tests: \K\d+" backend-test-output.txt 2>/dev/null | head -1 || echo "N/A")
-          PASSED=$(grep -oP "passed, \K\d+" backend-test-output.txt 2>/dev/null | head -1 || echo "N/A")
-          FAILED=$(grep -oP ", \d+ failed" backend-test-output.txt 2>/dev/null | grep -oP "\d+" | head -1 || echo "0")
-          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Test Suites | ${SUITES} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Tests | ${TESTS} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Passed | ${PASSED} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Failed | ${FAILED} |" >> $GITHUB_STEP_SUMMARY

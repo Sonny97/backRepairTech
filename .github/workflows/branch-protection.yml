@@ -3,7 +3,7 @@ name: Branch Check
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [develop, master, main, release/*]
+    branches: [develop, master]
 
 jobs:
   branch-check:
@@ -24,13 +24,14 @@ jobs:
       - name: Check branch name conventions
         run: |
           BRANCH_NAME="${{ github.head_ref }}"
-          ALLOWED_PREFIXES="^feature/|^feat/|^hotfix/|^refactor/|^release/|^fix/"
+          ALLOWED_PREFIXES="^feature/|^feat/|^hotfix/|^refactor/|^release/"
 
           if echo "$BRANCH_NAME" | grep -Eq "$ALLOWED_PREFIXES"; then
             echo "✅ Branch '$BRANCH_NAME' follows conventions"
           else
-            echo "⚠️  Branch '$BRANCH_NAME' doesn't follow standard naming"
-            echo "   Recommended: feature/*, feat/*, hotfix/*, fix/*, refactor/*, release/*"
+            echo "❌ Branch '$BRANCH_NAME' not allowed to merge into ${{ github.base_ref }}"
+            echo "   Allowed: feature/*, feat/*, hotfix/*, refactor/*, release/*"
+            exit 1
           fi
 
       - name: Commit info
